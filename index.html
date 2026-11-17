@@ -24,7 +24,7 @@
   }
   * { box-sizing: border-box; }
   body { margin: 0; background: var(--bg); color: var(--fg); font: 15px/1.5 var(--font-body); }
-  .wrap { max-width: 1080px; margin: 0 auto; padding-block: 32px 48px;
+  .wrap { max-width: 1080px; margin: 0 auto; padding-top: 32px; padding-bottom: 48px;
     padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px));
     display: flex; flex-direction: column; gap: 24px; }
   a { color: inherit; }
@@ -153,6 +153,15 @@
 </main>
 
 <script>
+  // Runs before the main script. If that script can't run in this browser, say so instead of showing "Loading..." forever.
+  window.onerror = function (msg) {
+    var u = document.getElementById('updated'), l = document.getElementById('lede');
+    if (u) u.textContent = 'This browser could not run the page (' + msg + '). Try updating the phone.';
+    if (l) l.textContent = 'Something went wrong loading the snow report.';
+  };
+  setTimeout(function () { if (!window.__snowReady) window.onerror('script did not start'); }, 4000);
+</script>
+<script>
 const MOUNTAINS = [
   {"id":"steamboat","name":"Steamboat","place":"Colorado","region":"Rockies","lat":40.4537,"lon":-106.7587,"elevFt":9528,"stakes":[["Stake cam 1","https://cams.opensnow.com/latest/2780/720.webp"],["Stake cam 2","https://cams.opensnow.com/latest/3402/720.webp"]],"cams":"https://www.steamboat.com/the-mountain/live-cams"},
   {"id":"alta","name":"Alta","place":"Utah","region":"Rockies","lat":40.5784,"lon":-111.6328,"elevFt":9895,"stakes":[["Stake cam","https://cams.opensnow.com/latest/2826/720.webp"]],"cams":"https://www.alta.com/weather#mountain-cams"},
@@ -169,62 +178,78 @@ const MOUNTAINS = [
   {"id":"kitzbuhel","name":"Kitzbühel","place":"Austria","region":"Europe","lat":47.4623,"lon":12.4074,"elevFt":4078,"stakes":[],"cams":"https://www.kitzski.at/en/current-info/webcams.html"},
   {"id":"megeve","name":"Megève","place":"France","region":"Europe","lat":45.8504,"lon":6.6696,"elevFt":5663,"stakes":[],"cams":"https://opensnow.com/location/frmegeve/cams"}
 ];
-const ORDER = MOUNTAINS.map((m) => m.id);
+const ORDER = MOUNTAINS.map(function (m) { return m.id; });
 const REGIONS = ['Rockies', 'Canada', 'Europe'];
-const state = { rows: null, win: 'new_7d', region: '', stakeOnly: false, sort: 'mine', dir: 'asc', grouped: false, loading: false };
+const state = { rows: null, win: 'new_7d', region: '', stakeOnly: false, sort: 'mine', dir: 'asc', grouped: false, loading: false, seasonMissing: false };
 
+// Written to run on older iPhones/iPads too (Safari 11+): no ??, ?., object spread,
+// findLastIndex, replaceChildren, and color-mix only as an enhancement.
 const $ = (id) => document.getElementById(id);
-const el = (tag, props = {}, ...kids) => { const e = document.createElement(tag); Object.assign(e, props); e.append(...kids); return e; };
+const clear = (e) => { while (e.firstChild) e.removeChild(e.firstChild); return e; };
+const put = (e, kids) => { clear(e); kids.forEach((k) => e.append(k)); };
+const el = (tag, props, ...kids) => { const e = document.createElement(tag); Object.assign(e, props || {}); kids.forEach((k) => e.append(k)); return e; };
 const SVG = 'http://www.w3.org/2000/svg';
-const svgEl = (tag, attrs = {}) => { const e = document.createElementNS(SVG, tag); for (const k in attrs) e.setAttribute(k, attrs[k]); return e; };
+const svgEl = (tag, attrs) => { const e = document.createElementNS(SVG, tag); for (const k in (attrs || {})) e.setAttribute(k, attrs[k]); return e; };
 const toIn = (cm) => (cm == null ? null : cm / 2.54);
 const fmt = (v) => (v == null ? '—' : v === 0 ? '0' : v >= 10 ? String(Math.round(v)) : v.toFixed(1));
 const ymd = (d) => d.toISOString().slice(0, 10);
+const num = (v) => (typeof v === 'number' ? v : 0);
 
-function coordParams(list) {
-  return {
+function query(list, extra) {
+  const p = {
     latitude: list.map((m) => m.lat).join(','),
     longitude: list.map((m) => m.lon).join(','),
     elevation: list.map((m) => Math.round(m.elevFt * 0.3048)).join(','),
     timezone: 'GMT',
   };
+  Object.assign(p, extra);
+  return Object.keys(p).map((k) => k + '=' + encodeURIComponent(p[k])).join('&');
 }
 
-async function getJSON(url) {
-  const r = await fetch(url, { cache: 'no-store' });
-  if (!r.ok) throw new Error(`Open-Meteo answered ${r.status}`);
-  const j = await r.json();
-  return Array.isArray(j) ? j : [j];
+// fetch with a hard timeout, so a stalled connection ends in a message instead of "Loading…" forever.
+function getJSON(url, ms) {
+  const ctrl = typeof AbortController === 'function' ? new AbortController() : null;
+  let timer;
+  const timeout = new Promise((_, reject) => {
+    timer = setTimeout(() => { if (ctrl) ctrl.abort(); reject(new Error('timed out')); }, ms);
+  });
+  const req = fetch(url, ctrl ? { cache: 'no-store', signal: ctrl.signal } : { cache: 'no-store' })
+    .then((r) => { if (!r.ok) throw new Error('Open-Meteo answered ' + r.status); return r.json(); })
+    .then((j) => (Array.isArray(j) ? j : [j]));
+  return Promise.race([req, timeout]).then((v) => { clearTimeout(timer); return v; }, (e) => { clearTimeout(timer); throw e; });
 }
 
 async function loadSnow() {
   const now = new Date();
-  const nhStart = `${now.getUTCMonth() >= 6 ? now.getUTCFullYear() : now.getUTCFullYear() - 1}-10-01`;
+  const nhStart = (now.getUTCMonth() >= 6 ? now.getUTCFullYear() : now.getUTCFullYear() - 1) + '-10-01';
   const yesterday = ymd(new Date(now.getTime() - 86400000));
-  const fq = new URLSearchParams({ ...coordParams(MOUNTAINS), hourly: 'snowfall,snow_depth', past_days: '8', forecast_days: '4' });
-  const sq = new URLSearchParams({ ...coordParams(MOUNTAINS), daily: 'snowfall_sum', start_date: nhStart, end_date: yesterday });
-  const [fc, season] = await Promise.all([
-    getJSON(`https://api.open-meteo.com/v1/forecast?${fq}`),
-    nhStart <= yesterday ? getJSON(`https://historical-forecast-api.open-meteo.com/v1/forecast?${sq}`) : Promise.resolve(null),
-  ]);
-  const todayStart = Date.parse(ymd(now) + 'T00:00Z');
+  const fcURL = 'https://api.open-meteo.com/v1/forecast?' + query(MOUNTAINS, { hourly: 'snowfall,snow_depth', past_days: '8', forecast_days: '4' });
+  const seURL = 'https://historical-forecast-api.open-meteo.com/v1/forecast?' + query(MOUNTAINS, { daily: 'snowfall_sum', start_date: nhStart, end_date: yesterday });
+  // The season archive is a bonus: if it fails, still show everything else.
+  const seasonP = nhStart <= yesterday ? getJSON(seURL, 25000).catch(() => 'failed') : Promise.resolve(null);
+  let fc;
+  try { fc = await getJSON(fcURL, 25000); }
+  catch (e) { fc = await getJSON(fcURL, 25000); } // one retry
+  let season = await seasonP;
+  state.seasonMissing = season === 'failed';
+  if (season === 'failed') season = null;
+  const todayStart = Date.parse(ymd(now) + 'T00:00:00Z');
   return MOUNTAINS.map((m, k) => {
     const d = fc[k];
-    const t = d.hourly.time.map((x) => Date.parse(x + 'Z'));
+    const t = d.hourly.time.map((x) => Date.parse(x + ':00Z'));
     const sf = d.hourly.snowfall, depth = d.hourly.snow_depth;
-    const cur = t.findLastIndex((x) => x <= now.getTime());
-    const sum = (a, b) => { let s = 0; for (let h = Math.max(0, a); h <= Math.min(b, t.length - 1); h++) s += sf[h] ?? 0; return s; };
-    const archive = season ? season[k].daily.snowfall_sum.reduce((a, v) => a + (v ?? 0), 0) : 0;
-    const todayFrom = t.findIndex((x) => x > todayStart);
-    return {
-      ...m,
+    let cur = -1; for (let h = 0; h < t.length; h++) if (t[h] <= now.getTime()) cur = h;
+    const sum = (a, b) => { let s = 0; for (let h = Math.max(0, a); h <= Math.min(b, t.length - 1); h++) s += num(sf[h]); return s; };
+    const archive = season ? season[k].daily.snowfall_sum.reduce((a, v) => a + num(v), 0) : null;
+    let todayFrom = t.length; for (let h = 0; h < t.length; h++) if (t[h] > todayStart) { todayFrom = h; break; }
+    return Object.assign({}, m, {
       new_24h: toIn(sum(cur - 23, cur)),
       new_72h: toIn(sum(cur - 71, cur)),
       new_7d: toIn(sum(cur - 167, cur)),
-      season: toIn(archive + sum(todayFrom, cur)),
+      season: archive == null ? null : toIn(archive + sum(todayFrom, cur)),
       next_72h: toIn(sum(cur + 1, cur + 72)),
-      depth: depth[cur] == null ? null : toIn(depth[cur] * 100),
-    };
+      depth: cur < 0 || depth[cur] == null ? null : toIn(depth[cur] * 100),
+    });
   });
 }
 
@@ -237,32 +262,31 @@ function drawLede() {
   const fresh = state.rows.filter((r) => r.new_24h >= 0.4).length;
   const b = (t) => el('b', { textContent: t });
   if (!lead || lead.new_72h < 0.05) {
-    p.replaceChildren('No new snow at any of your mountains in the last 72 hours. ', b(String(fresh)), ' of ', b(String(state.rows.length)), ' picked up snow in the last 24 hours.');
+    put(p, ['No new snow at any of your mountains in the last 72 hours. ', b(String(fresh)), ' of ', b(String(state.rows.length)), ' picked up snow in the last 24 hours.']);
   } else {
-    p.replaceChildren(b(lead.name), ' leads the last 72 hours with ', b(fmt(lead.new_72h) + ' in'), '. ', b(String(fresh)), ' of ', b(String(state.rows.length)), ' mountains picked up new snow in the last 24 hours.');
+    put(p, [b(lead.name), ' leads the last 72 hours with ', b(fmt(lead.new_72h) + ' in'), '. ', b(String(fresh)), ' of ', b(String(state.rows.length)), ' mountains picked up new snow in the last 24 hours.']);
   }
 }
 
 function drawStakes() {
-  const box = $('stakes');
-  box.replaceChildren();
+  const box = clear($('stakes'));
   if (!state.rows) { box.append(el('div', { className: 'empty', textContent: state.loading ? 'Loading…' : '—' })); return; }
   const key = state.win;
   const rows = visible().filter((r) => r[key] > 0.04).sort((a, b) => b[key] - a[key]);
   const winLabel = { new_24h: 'the last 24 hours', new_72h: 'the last 72 hours', new_7d: 'the last 7 days', next_72h: 'the next 72 hours' }[key];
-  if (!rows.length) { box.append(el('div', { className: 'empty', textContent: `No snow in ${winLabel} for this selection.` })); return; }
+  if (!rows.length) { box.append(el('div', { className: 'empty', textContent: 'No snow in ' + winLabel + ' for this selection.' })); return; }
   const W = box.clientWidth || 600, rowH = 34, H = rows.length * rowH;
-  const svg = svgEl('svg', { viewBox: `0 0 ${W} ${H}`, height: H, role: 'img', 'aria-label': `Snowfall in ${winLabel}, in inches, by mountain` });
+  const svg = svgEl('svg', { viewBox: '0 0 ' + W + ' ' + H, height: H, role: 'img', 'aria-label': 'Snowfall in ' + winLabel + ', in inches, by mountain' });
   box.append(svg);
   const probe = svgEl('text', { class: 'lbl' }); svg.append(probe);
-  let lw = 0; rows.forEach((r) => { probe.textContent = r.name; lw = Math.max(lw, probe.getComputedTextLength()); }); probe.remove();
+  let lw = 0; rows.forEach((r) => { probe.textContent = r.name; lw = Math.max(lw, probe.getComputedTextLength()); }); svg.removeChild(probe);
   const labelW = Math.min(W < 460 ? 130 : 210, Math.ceil(lw) + 14), valW = 58;
-  const max = Math.max(...rows.map((r) => r[key]));
+  const max = Math.max.apply(null, rows.map((r) => r[key]));
   const span = Math.max(40, W - labelW - valW), x = (v) => (v / max) * span;
   const step = max > 60 ? 6 : max > 30 ? 3 : 1;
   const tip = el('div', { className: 'tip', hidden: true }); box.append(tip);
   rows.forEach((r, i) => {
-    const g = svgEl('g', { transform: `translate(0,${i * rowH})` }); svg.append(g);
+    const g = svgEl('g', { transform: 'translate(0,' + i * rowH + ')' }); svg.append(g);
     const name = svgEl('text', { class: 'lbl', x: 0, y: rowH / 2, 'dominant-baseline': 'middle' }); name.textContent = r.name; g.append(name);
     let t = r.name; while (name.getComputedTextLength() > labelW - 10 && t.length > 4) { t = t.slice(0, -1); name.textContent = t + '…'; }
     const w = Math.max(2, x(r[key]));
@@ -274,28 +298,28 @@ function drawStakes() {
     const val = svgEl('text', { class: 'val', x: labelW + w + 6, y: rowH / 2, 'dominant-baseline': 'middle' }); val.textContent = fmt(r[key]) + '"'; g.append(val);
     const hit = svgEl('rect', { x: 0, y: 0, width: W, height: rowH, fill: 'transparent' }); g.append(hit);
     const show = (ev) => {
-      tip.replaceChildren(el('strong', { textContent: r.name }), el('span', { textContent: `${r.place} · ${r.elevFt.toLocaleString()} ft` }),
-        ...[['24 hours', 'new_24h'], ['72 hours', 'new_72h'], ['7 days', 'new_7d'], ['Next 72 h', 'next_72h']].map(([l, k]) => el('div', { textContent: `${l}: ${fmt(r[k])}"` })));
+      put(tip, [el('strong', { textContent: r.name }), el('span', { textContent: r.place + ' · ' + r.elevFt.toLocaleString() + ' ft' })]
+        .concat([['24 hours', 'new_24h'], ['72 hours', 'new_72h'], ['7 days', 'new_7d'], ['Next 72 h', 'next_72h']].map((p) => el('div', { textContent: p[0] + ': ' + fmt(r[p[1]]) + '"' }))));
       tip.hidden = false;
       const rect = box.getBoundingClientRect();
       const mx = ev.clientX - rect.left, my = ev.clientY - rect.top;
       tip.style.left = Math.max(0, Math.min(box.clientWidth - tip.offsetWidth, mx + 12)) + 'px';
       tip.style.top = my + 14 + 'px';
     };
-    hit.addEventListener('pointerenter', show); hit.addEventListener('pointermove', show);
-    hit.addEventListener('pointerleave', () => { tip.hidden = true; });
+    hit.addEventListener('mouseenter', show); hit.addEventListener('mousemove', show);
+    hit.addEventListener('mouseleave', () => { tip.hidden = true; });
   });
 }
 
 function drawRows() {
-  const tb = $('rows');
-  tb.replaceChildren();
+  const tb = clear($('rows'));
   if (!state.rows) {
     tb.append(el('tr', {}, el('td', { colSpan: 8, className: 'skeleton', textContent: state.loading ? 'Loading…' : '—' })));
     return;
   }
   const idx = (r) => ORDER.indexOf(r.id), k = state.sort;
-  const cmp = k === 'mine' ? (a, b) => idx(a) - idx(b) : (a, b) => (a[k] ?? -1) - (b[k] ?? -1);
+  const val = (r) => (r[k] == null ? -1 : r[k]);
+  const cmp = k === 'mine' ? (a, b) => idx(a) - idx(b) : (a, b) => val(a) - val(b);
   const rows = visible().slice().sort((a, b) => (state.dir === 'asc' ? cmp(a, b) : cmp(b, a)) || idx(a) - idx(b));
   if (state.grouped) rows.sort((a, b) => REGIONS.indexOf(a.region) - REGIONS.indexOf(b.region) || idx(a) - idx(b));
   const shadeMax = { new_24h: 12, new_72h: 24, new_7d: 36, season: 60, next_72h: 24 };
@@ -307,12 +331,16 @@ function drawRows() {
     ['new_24h', 'new_72h', 'new_7d', 'season', 'next_72h', 'depth'].forEach((f) => {
       const v = r[f] == null ? null : Math.round(r[f] * 10) / 10;
       const td = el('td', { textContent: fmt(v), className: (f === 'next_72h' ? 'fc ' : '') + (!v ? 'zero' : '') });
-      if (v > 0 && shadeMax[f]) td.style.background = `color-mix(in srgb, var(--accent) ${Math.round(8 + 50 * Math.min(1, v / shadeMax[f]))}%, transparent)`;
+      if (v > 0 && shadeMax[f]) {
+        const pct = Math.round(8 + 50 * Math.min(1, v / shadeMax[f]));
+        td.style.background = 'rgba(47, 111, 208, ' + pct / 100 + ')'; // fallback for browsers without color-mix
+        td.style.background = 'color-mix(in srgb, var(--accent) ' + pct + '%, transparent)';
+      }
       tr.append(td);
     });
     const cams = el('span', { className: 'cams' });
-    const link = (href, text, cls = '') => cams.append(el('a', { href, target: '_blank', rel: 'noopener', textContent: text, className: cls }));
-    r.stakes.forEach(([label, href]) => link(href, label, 'stake'));
+    const link = (href, text, cls) => cams.append(el('a', { href: href, target: '_blank', rel: 'noopener', textContent: text, className: cls || '' }));
+    r.stakes.forEach((s) => link(s[1], s[0], 'stake'));
     if (!r.stakes.length) cams.append(el('span', { className: 'none', textContent: 'No stake cam' }));
     if (r.cams) link(r.cams, 'Resort cams');
     tr.append(el('td', {}, cams));
@@ -329,6 +357,8 @@ function paintSort() {
 
 const drawAll = () => { drawLede(); drawStakes(); drawRows(); };
 
+const clock = (d) => { try { return d.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' }); } catch (e) { return d.toTimeString().slice(0, 5); } };
+
 async function refresh() {
   state.loading = true;
   $('refresh').disabled = true;
@@ -336,9 +366,9 @@ async function refresh() {
   if (!state.rows) drawAll();
   try {
     state.rows = await loadSnow();
-    $('updated').textContent = 'Updated ' + new Date().toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
+    $('updated').textContent = 'Updated ' + clock(new Date()) + (state.seasonMissing ? ' · season totals unavailable' : '');
   } catch (e) {
-    $('updated').textContent = `Couldn't reach Open-Meteo (${e.message}). Press Refresh to try again.`;
+    $('updated').textContent = 'Could not reach the weather service (' + e.message + '). Press Refresh to try again.';
     if (!state.rows) $('lede').textContent = 'No data yet: the weather service did not answer.';
   } finally {
     state.loading = false;
@@ -364,10 +394,13 @@ document.querySelectorAll('th[data-sort]').forEach((th) => th.addEventListener('
   paintSort(); drawRows();
 }));
 let lastW = 0;
-new ResizeObserver(() => { const w = $('stakes').clientWidth; if (w !== lastW) { lastW = w; drawStakes(); } }).observe($('stakes'));
+const onResize = () => { const w = $('stakes').clientWidth; if (w !== lastW) { lastW = w; drawStakes(); } };
+if (typeof ResizeObserver === 'function') new ResizeObserver(onResize).observe($('stakes'));
+else window.addEventListener('resize', onResize);
 document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible' && state.rows && !state.loading) refresh(); });
 paintSort();
 refresh();
+window.__snowReady = true;
 </script>
 </body>
 </html>
