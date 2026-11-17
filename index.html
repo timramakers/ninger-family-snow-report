@@ -1,0 +1,372 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Ninger Family Snow Report</title>
+<meta name="description" content="Live modeled snowfall and snow stake cams for the Ninger family's Ikon Pass mountains.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=Source+Serif+4:opsz,wght@8..60,400;8..60,600&display=swap">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect x='13' y='3' width='6' height='26' rx='1' fill='%232f6fd0'/%3E%3Cpath d='M13 8h3M13 13h4M13 18h3M13 23h4' stroke='white' stroke-width='1.5'/%3E%3C/svg%3E">
+<style>
+  /* Layout: one centered column; header, stake-bar chart card, table card, notes. */
+  :root {
+    --bg: #f5f7fa; --panel: #ffffff; --fg: #18202b; --muted: #5d6877; --line: #dfe4ea;
+    --accent: #2f6fd0; --popover: #ffffff; --shadow: 0 6px 24px rgba(20, 30, 45, .14);
+    --font-body: "Inter", system-ui, -apple-system, "Segoe UI", sans-serif;
+    --font-display: "Source Serif 4", Georgia, "Times New Roman", serif;
+    --radius: 10px; color-scheme: light;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg: #0f1419; --panel: #171e26; --fg: #e8edf2; --muted: #95a1b0; --line: #2a3440;
+      --accent: #6aa4ff; --popover: #1d2630; --shadow: 0 6px 24px rgba(0, 0, 0, .5); color-scheme: dark; }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--fg); font: 15px/1.5 var(--font-body); }
+  .wrap { max-width: 1080px; margin: 0 auto; padding-block: 32px 48px;
+    padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px));
+    display: flex; flex-direction: column; gap: 24px; }
+  a { color: inherit; }
+  .head { display: flex; flex-wrap: wrap; align-items: flex-end; justify-content: space-between; gap: 12px; }
+  .head > div { min-width: 0; flex: 1 1 26rem; display: flex; flex-direction: column; gap: 6px; }
+  .eyebrow { font-size: 12px; color: var(--muted); letter-spacing: .06em; text-transform: uppercase; }
+  h1 { font-family: var(--font-display); font-weight: 400; font-size: clamp(2rem, 5vw, 2.8rem); line-height: 1.05; margin: 0; text-wrap: balance; }
+  .lede { margin: 0; max-width: 62ch; }
+  .lede b { font-weight: 600; font-variant-numeric: tabular-nums; }
+  .head > .status { flex: 0 1 auto; flex-direction: row; align-items: center; gap: 10px; font-size: 13px; color: var(--muted); }
+  .btn { appearance: none; border: 1px solid var(--line); background: var(--panel); color: var(--fg); font: inherit; font-size: 13px; font-weight: 500;
+    padding: 6px 14px; border-radius: 999px; cursor: pointer; }
+  .btn:hover { border-color: var(--fg); }
+  .btn:disabled { opacity: .5; cursor: default; }
+
+  .seg { display: inline-flex; border: 1px solid var(--line); border-radius: 999px; padding: 3px; background: var(--panel); gap: 2px; flex-wrap: wrap; }
+  .seg button { appearance: none; border: 0; background: transparent; color: var(--muted); font: inherit; font-size: 13px; font-weight: 500; padding: 6px 14px; border-radius: 999px; cursor: pointer; white-space: nowrap; }
+  .seg button[aria-pressed="true"] { background: var(--fg); color: var(--bg); }
+  button:focus-visible, a:focus-visible, select:focus-visible, input:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+  .card { background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius); padding: 20px; display: flex; flex-direction: column; gap: 14px; min-width: 0; }
+  .cardhead { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 10px; }
+  h2 { margin: 0; font-size: 17px; font-weight: 600; }
+  .note { margin: 0; font-size: 12.5px; color: var(--muted); line-height: 1.45; }
+
+  .stakes { position: relative; min-height: 120px; }
+  .stakes svg { display: block; width: 100%; overflow: visible; }
+  .stakes .lbl { fill: var(--fg); font-size: 13px; }
+  .stakes .val { fill: var(--fg); font-size: 13px; font-weight: 600; font-variant-numeric: tabular-nums; }
+  .stakes .bar { fill: var(--accent); }
+  .stakes .grad { stroke: var(--panel); stroke-width: 1.5; }
+  .stakes .grad.major { stroke-width: 2.5; }
+  .stakes .empty { color: var(--muted); font-size: 14px; padding: 12px 0; }
+  .tip { position: absolute; pointer-events: none; background: var(--popover); border: 1px solid var(--line); box-shadow: var(--shadow);
+    border-radius: 8px; padding: 8px 10px; font-size: 12.5px; line-height: 1.45; min-width: 160px; z-index: 5; }
+  .tip strong { display: block; font-size: 14px; }
+  .tip span { color: var(--muted); }
+
+  .filters { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; }
+  select { font: inherit; font-size: 13px; color: var(--fg); background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 6px 10px; }
+  .check { display: inline-flex; align-items: center; gap: 6px; font-size: 13px; cursor: pointer; }
+  .tablewrap { overflow-x: auto; margin: 0 -20px; padding: 0 20px; }
+  table { width: 100%; border-collapse: collapse; font-variant-numeric: tabular-nums; min-width: 720px; }
+  th { text-align: right; font-size: 12.5px; font-weight: 500; color: var(--muted); padding: 6px 8px; border-bottom: 1px solid var(--line); white-space: nowrap; vertical-align: bottom; }
+  th:first-child, td:first-child { text-align: left; position: sticky; left: 0; background: var(--panel); z-index: 1; }
+  th button { appearance: none; border: 0; background: none; padding: 0; color: inherit; font: inherit; cursor: pointer; }
+  th button::after { content: ""; display: inline-block; width: .9em; }
+  th[aria-sort="descending"] button::after { content: " ↓"; }
+  th[aria-sort="ascending"] button::after { content: " ↑"; }
+  th[aria-sort] { color: var(--fg); }
+  td { padding: 8px; border-bottom: 1px solid var(--line); text-align: right; white-space: nowrap; }
+  td.zero { color: var(--muted); }
+  td.fc { font-style: italic; }
+  tr.grp td { font-size: 12px; color: var(--muted); letter-spacing: .06em; text-transform: uppercase; padding-top: 16px; text-align: left; position: static; }
+  .name { display: flex; flex-direction: column; line-height: 1.25; }
+  .name small { color: var(--muted); font-size: 12px; }
+  .cams { display: inline-flex; gap: 6px; justify-content: flex-end; }
+  .cams a { font-size: 12.5px; text-decoration: none; padding: 3px 10px; border-radius: 999px; border: 1px solid var(--line); }
+  .cams a.stake { background: var(--fg); color: var(--bg); border-color: var(--fg); }
+  .cams a:hover { border-color: var(--fg); }
+  .cams .none { font-size: 12.5px; color: var(--muted); padding: 3px 4px; }
+  .skeleton { color: var(--muted); }
+  details summary { cursor: pointer; font-size: 13px; color: var(--muted); }
+  details p { margin: 10px 0 0; max-width: 70ch; font-size: 13px; color: var(--muted); }
+  .error { border-color: #c0392b; }
+  @media (prefers-reduced-motion: no-preference) { .stakes .bar { transition: width .4s ease-out; } }
+</style>
+</head>
+<body>
+<main class="wrap">
+  <header class="head">
+    <div>
+      <span class="eyebrow">Ikon Pass 2026/27 · modeled snowfall in inches</span>
+      <h1>Ninger Family Snow Report</h1>
+      <p class="lede" id="lede"><span class="skeleton">Loading the latest snowfall…</span></p>
+    </div>
+    <div class="status"><span id="updated">Fetching…</span><button class="btn" id="refresh" type="button">Refresh</button></div>
+  </header>
+
+  <section class="card" id="leaders">
+    <div class="cardhead">
+      <h2>Deepest totals</h2>
+      <div class="seg" role="group" aria-label="Snowfall window" id="windows">
+        <button type="button" data-win="new_24h" aria-pressed="false">24 hours</button>
+        <button type="button" data-win="new_72h" aria-pressed="false">72 hours</button>
+        <button type="button" data-win="new_7d" aria-pressed="true">7 days</button>
+        <button type="button" data-win="next_72h" aria-pressed="false">Next 72 h</button>
+      </div>
+    </div>
+    <div class="stakes" id="stakes"></div>
+    <p class="note">Each bar is drawn like a snow stake, with a mark every inch. "Next 72 h" is forecast snowfall, not observed.</p>
+  </section>
+
+  <section class="card" id="all">
+    <div class="cardhead">
+      <h2>My mountains</h2>
+      <div class="filters">
+        <select id="region" aria-label="Region"><option value="">All regions</option></select>
+        <label class="check"><input type="checkbox" id="stake-only"> Stake cams only</label>
+      </div>
+    </div>
+    <div class="tablewrap">
+      <table>
+        <thead>
+          <tr>
+            <th data-sort="mine"><button type="button">Mountain</button></th>
+            <th data-sort="new_24h"><button type="button">24 h</button></th>
+            <th data-sort="new_72h"><button type="button">72 h</button></th>
+            <th data-sort="new_7d"><button type="button">7 days</button></th>
+            <th data-sort="season"><button type="button">Since Oct 1</button></th>
+            <th data-sort="next_72h"><button type="button">Next 72 h</button></th>
+            <th data-sort="depth"><button type="button">Depth</button></th>
+            <th>Cams</th>
+          </tr>
+        </thead>
+        <tbody id="rows"></tbody>
+      </table>
+    </div>
+    <p class="note">Shaded cells show where snow fell; darker means more. Click a column to sort by it; click Mountain to return to your order, and click it again to group by region. "Stake cam" opens the latest image from the resort's own snow stake. "Resort cams" opens the resort's official webcam page.</p>
+  </section>
+
+  <details>
+    <summary>About these numbers</summary>
+    <p>The page asks Open-Meteo for fresh numbers every time you open it or press Refresh. Snowfall is modeled, not resort-reported: it comes from Open-Meteo's weather models, downscaled to each mountain's forecast elevation and summed hour by hour, so it can differ from what a resort measures on its stake. "Since Oct 1" adds Open-Meteo's daily archive through yesterday to today's hourly snowfall. Depth is the model's snow depth at that point. Stake cam images are served by OpenSnow.</p>
+  </details>
+</main>
+
+<script>
+const MOUNTAINS = [
+  {"id":"steamboat","name":"Steamboat","place":"Colorado","region":"Rockies","lat":40.4537,"lon":-106.7587,"elevFt":9528,"stakes":[["Stake cam 1","https://cams.opensnow.com/latest/2780/720.webp"],["Stake cam 2","https://cams.opensnow.com/latest/3402/720.webp"]],"cams":"https://www.steamboat.com/the-mountain/live-cams"},
+  {"id":"alta","name":"Alta","place":"Utah","region":"Rockies","lat":40.5784,"lon":-111.6328,"elevFt":9895,"stakes":[["Stake cam","https://cams.opensnow.com/latest/2826/720.webp"]],"cams":"https://www.alta.com/weather#mountain-cams"},
+  {"id":"snowbird","name":"Snowbird","place":"Utah","region":"Rockies","lat":40.5665,"lon":-111.6523,"elevFt":10171,"stakes":[["Stake cam","https://cams.opensnow.com/latest/2600/720.webp"]],"cams":"https://www.snowbird.com/the-mountain/webcams/view-all-webcams"},
+  {"id":"snowbasin","name":"Snowbasin","place":"Utah","region":"Rockies","lat":41.1994,"lon":-111.8593,"elevFt":7566,"stakes":[["Stake cam","https://cams.opensnow.com/latest/1219/720.webp"]],"cams":"https://www.snowbasin.com/the-mountain/web-cams/"},
+  {"id":"solitude","name":"Solitude","place":"Utah","region":"Rockies","lat":40.6163,"lon":-111.6032,"elevFt":8757,"stakes":[["Stake cam","https://cams.opensnow.com/latest/3364/720.webp"]],"cams":"https://www.solitudemountain.com/mountain-and-village/webcams"},
+  {"id":"brighton","name":"Brighton","place":"Utah","region":"Rockies","lat":40.5898,"lon":-111.5728,"elevFt":9446,"stakes":[],"cams":"https://www.brightonresort.com/conditions#cams"},
+  {"id":"deervalley","name":"Deer Valley","place":"Utah","region":"Rockies","lat":40.611,"lon":-111.4999,"elevFt":8888,"stakes":[["Stake cam 1","https://cams.opensnow.com/latest/4830/720.webp"],["Stake cam 2","https://cams.opensnow.com/latest/2689/720.webp"]],"cams":"https://www.deervalley.com/explore-the-mountain/webcams"},
+  {"id":"arapahoebasin","name":"Arapahoe Basin","place":"Colorado","region":"Rockies","lat":39.6324,"lon":-105.871,"elevFt":11621,"stakes":[["Stake cam","https://cams.opensnow.com/latest/2017/720.webp"]],"cams":"https://www.arapahoebasin.com/mountain-cams/"},
+  {"id":"winterpark","name":"Winter Park","place":"Colorado","region":"Rockies","lat":39.8631,"lon":-105.7736,"elevFt":11020,"stakes":[["Stake cam","https://cams.opensnow.com/latest/2506/720.webp"]],"cams":"https://www.winterparkresort.com/the-mountain/mountain-cams"},
+  {"id":"copper","name":"Copper Mountain","place":"Colorado","region":"Rockies","lat":39.4807,"lon":-106.1592,"elevFt":11257,"stakes":[["Stake cam","https://cams.opensnow.com/latest/1960/720.webp"]],"cams":"https://www.coppercolorado.com/the-mountain/webcams"},
+  {"id":"revelstoke","name":"Revelstoke","place":"British Columbia","region":"Canada","lat":50.9638,"lon":-118.1175,"elevFt":5945,"stakes":[],"cams":"https://www.revelstokemountainresort.com/mountain/conditions/webcams/"},
+  {"id":"kitzbuhel","name":"Kitzbühel","place":"Austria","region":"Europe","lat":47.4623,"lon":12.4074,"elevFt":4078,"stakes":[],"cams":"https://www.kitzski.at/en/current-info/webcams.html"},
+  {"id":"megeve","name":"Megève","place":"France","region":"Europe","lat":45.8504,"lon":6.6696,"elevFt":5663,"stakes":[],"cams":"https://opensnow.com/location/frmegeve/cams"}
+];
+const ORDER = MOUNTAINS.map((m) => m.id);
+const REGIONS = ['Rockies', 'Canada', 'Europe'];
+const state = { rows: null, win: 'new_7d', region: '', stakeOnly: false, sort: 'mine', dir: 'asc', grouped: false, loading: false };
+
+const $ = (id) => document.getElementById(id);
+const el = (tag, props = {}, ...kids) => { const e = document.createElement(tag); Object.assign(e, props); e.append(...kids); return e; };
+const SVG = 'http://www.w3.org/2000/svg';
+const svgEl = (tag, attrs = {}) => { const e = document.createElementNS(SVG, tag); for (const k in attrs) e.setAttribute(k, attrs[k]); return e; };
+const toIn = (cm) => (cm == null ? null : cm / 2.54);
+const fmt = (v) => (v == null ? '—' : v === 0 ? '0' : v >= 10 ? String(Math.round(v)) : v.toFixed(1));
+const ymd = (d) => d.toISOString().slice(0, 10);
+
+function coordParams(list) {
+  return {
+    latitude: list.map((m) => m.lat).join(','),
+    longitude: list.map((m) => m.lon).join(','),
+    elevation: list.map((m) => Math.round(m.elevFt * 0.3048)).join(','),
+    timezone: 'GMT',
+  };
+}
+
+async function getJSON(url) {
+  const r = await fetch(url, { cache: 'no-store' });
+  if (!r.ok) throw new Error(`Open-Meteo answered ${r.status}`);
+  const j = await r.json();
+  return Array.isArray(j) ? j : [j];
+}
+
+async function loadSnow() {
+  const now = new Date();
+  const nhStart = `${now.getUTCMonth() >= 6 ? now.getUTCFullYear() : now.getUTCFullYear() - 1}-10-01`;
+  const yesterday = ymd(new Date(now.getTime() - 86400000));
+  const fq = new URLSearchParams({ ...coordParams(MOUNTAINS), hourly: 'snowfall,snow_depth', past_days: '8', forecast_days: '4' });
+  const sq = new URLSearchParams({ ...coordParams(MOUNTAINS), daily: 'snowfall_sum', start_date: nhStart, end_date: yesterday });
+  const [fc, season] = await Promise.all([
+    getJSON(`https://api.open-meteo.com/v1/forecast?${fq}`),
+    nhStart <= yesterday ? getJSON(`https://historical-forecast-api.open-meteo.com/v1/forecast?${sq}`) : Promise.resolve(null),
+  ]);
+  const todayStart = Date.parse(ymd(now) + 'T00:00Z');
+  return MOUNTAINS.map((m, k) => {
+    const d = fc[k];
+    const t = d.hourly.time.map((x) => Date.parse(x + 'Z'));
+    const sf = d.hourly.snowfall, depth = d.hourly.snow_depth;
+    const cur = t.findLastIndex((x) => x <= now.getTime());
+    const sum = (a, b) => { let s = 0; for (let h = Math.max(0, a); h <= Math.min(b, t.length - 1); h++) s += sf[h] ?? 0; return s; };
+    const archive = season ? season[k].daily.snowfall_sum.reduce((a, v) => a + (v ?? 0), 0) : 0;
+    const todayFrom = t.findIndex((x) => x > todayStart);
+    return {
+      ...m,
+      new_24h: toIn(sum(cur - 23, cur)),
+      new_72h: toIn(sum(cur - 71, cur)),
+      new_7d: toIn(sum(cur - 167, cur)),
+      season: toIn(archive + sum(todayFrom, cur)),
+      next_72h: toIn(sum(cur + 1, cur + 72)),
+      depth: depth[cur] == null ? null : toIn(depth[cur] * 100),
+    };
+  });
+}
+
+const visible = () => (state.rows || []).filter((r) => (!state.region || r.region === state.region) && (!state.stakeOnly || r.stakes.length));
+
+function drawLede() {
+  const p = $('lede');
+  if (!state.rows) return;
+  const lead = state.rows.reduce((a, r) => (r.new_72h > (a ? a.new_72h : -1) ? r : a), null);
+  const fresh = state.rows.filter((r) => r.new_24h >= 0.4).length;
+  const b = (t) => el('b', { textContent: t });
+  if (!lead || lead.new_72h < 0.05) {
+    p.replaceChildren('No new snow at any of your mountains in the last 72 hours. ', b(String(fresh)), ' of ', b(String(state.rows.length)), ' picked up snow in the last 24 hours.');
+  } else {
+    p.replaceChildren(b(lead.name), ' leads the last 72 hours with ', b(fmt(lead.new_72h) + ' in'), '. ', b(String(fresh)), ' of ', b(String(state.rows.length)), ' mountains picked up new snow in the last 24 hours.');
+  }
+}
+
+function drawStakes() {
+  const box = $('stakes');
+  box.replaceChildren();
+  if (!state.rows) { box.append(el('div', { className: 'empty', textContent: state.loading ? 'Loading…' : '—' })); return; }
+  const key = state.win;
+  const rows = visible().filter((r) => r[key] > 0.04).sort((a, b) => b[key] - a[key]);
+  const winLabel = { new_24h: 'the last 24 hours', new_72h: 'the last 72 hours', new_7d: 'the last 7 days', next_72h: 'the next 72 hours' }[key];
+  if (!rows.length) { box.append(el('div', { className: 'empty', textContent: `No snow in ${winLabel} for this selection.` })); return; }
+  const W = box.clientWidth || 600, rowH = 34, H = rows.length * rowH;
+  const svg = svgEl('svg', { viewBox: `0 0 ${W} ${H}`, height: H, role: 'img', 'aria-label': `Snowfall in ${winLabel}, in inches, by mountain` });
+  box.append(svg);
+  const probe = svgEl('text', { class: 'lbl' }); svg.append(probe);
+  let lw = 0; rows.forEach((r) => { probe.textContent = r.name; lw = Math.max(lw, probe.getComputedTextLength()); }); probe.remove();
+  const labelW = Math.min(W < 460 ? 130 : 210, Math.ceil(lw) + 14), valW = 58;
+  const max = Math.max(...rows.map((r) => r[key]));
+  const span = Math.max(40, W - labelW - valW), x = (v) => (v / max) * span;
+  const step = max > 60 ? 6 : max > 30 ? 3 : 1;
+  const tip = el('div', { className: 'tip', hidden: true }); box.append(tip);
+  rows.forEach((r, i) => {
+    const g = svgEl('g', { transform: `translate(0,${i * rowH})` }); svg.append(g);
+    const name = svgEl('text', { class: 'lbl', x: 0, y: rowH / 2, 'dominant-baseline': 'middle' }); name.textContent = r.name; g.append(name);
+    let t = r.name; while (name.getComputedTextLength() > labelW - 10 && t.length > 4) { t = t.slice(0, -1); name.textContent = t + '…'; }
+    const w = Math.max(2, x(r[key]));
+    g.append(svgEl('rect', { class: 'bar', x: labelW, y: 7, height: rowH - 14, width: w, rx: 2 }));
+    for (let v = step; v < r[key]; v += step) {
+      const major = v % 12 === 0;
+      g.append(svgEl('line', { class: 'grad' + (major ? ' major' : ''), x1: labelW + x(v), x2: labelW + x(v), y1: major ? 7 : rowH / 2, y2: rowH - 7 }));
+    }
+    const val = svgEl('text', { class: 'val', x: labelW + w + 6, y: rowH / 2, 'dominant-baseline': 'middle' }); val.textContent = fmt(r[key]) + '"'; g.append(val);
+    const hit = svgEl('rect', { x: 0, y: 0, width: W, height: rowH, fill: 'transparent' }); g.append(hit);
+    const show = (ev) => {
+      tip.replaceChildren(el('strong', { textContent: r.name }), el('span', { textContent: `${r.place} · ${r.elevFt.toLocaleString()} ft` }),
+        ...[['24 hours', 'new_24h'], ['72 hours', 'new_72h'], ['7 days', 'new_7d'], ['Next 72 h', 'next_72h']].map(([l, k]) => el('div', { textContent: `${l}: ${fmt(r[k])}"` })));
+      tip.hidden = false;
+      const rect = box.getBoundingClientRect();
+      const mx = ev.clientX - rect.left, my = ev.clientY - rect.top;
+      tip.style.left = Math.max(0, Math.min(box.clientWidth - tip.offsetWidth, mx + 12)) + 'px';
+      tip.style.top = my + 14 + 'px';
+    };
+    hit.addEventListener('pointerenter', show); hit.addEventListener('pointermove', show);
+    hit.addEventListener('pointerleave', () => { tip.hidden = true; });
+  });
+}
+
+function drawRows() {
+  const tb = $('rows');
+  tb.replaceChildren();
+  if (!state.rows) {
+    tb.append(el('tr', {}, el('td', { colSpan: 8, className: 'skeleton', textContent: state.loading ? 'Loading…' : '—' })));
+    return;
+  }
+  const idx = (r) => ORDER.indexOf(r.id), k = state.sort;
+  const cmp = k === 'mine' ? (a, b) => idx(a) - idx(b) : (a, b) => (a[k] ?? -1) - (b[k] ?? -1);
+  const rows = visible().slice().sort((a, b) => (state.dir === 'asc' ? cmp(a, b) : cmp(b, a)) || idx(a) - idx(b));
+  if (state.grouped) rows.sort((a, b) => REGIONS.indexOf(a.region) - REGIONS.indexOf(b.region) || idx(a) - idx(b));
+  const shadeMax = { new_24h: 12, new_72h: 24, new_7d: 36, season: 60, next_72h: 24 };
+  let last = null;
+  rows.forEach((r) => {
+    if (state.grouped && r.region !== last) { last = r.region; tb.append(el('tr', { className: 'grp' }, el('td', { colSpan: 8, textContent: r.region }))); }
+    const tr = el('tr');
+    tr.append(el('td', {}, el('div', { className: 'name' }, el('span', { textContent: r.name }), el('small', { textContent: r.place }))));
+    ['new_24h', 'new_72h', 'new_7d', 'season', 'next_72h', 'depth'].forEach((f) => {
+      const v = r[f] == null ? null : Math.round(r[f] * 10) / 10;
+      const td = el('td', { textContent: fmt(v), className: (f === 'next_72h' ? 'fc ' : '') + (!v ? 'zero' : '') });
+      if (v > 0 && shadeMax[f]) td.style.background = `color-mix(in srgb, var(--accent) ${Math.round(8 + 50 * Math.min(1, v / shadeMax[f]))}%, transparent)`;
+      tr.append(td);
+    });
+    const cams = el('span', { className: 'cams' });
+    const link = (href, text, cls = '') => cams.append(el('a', { href, target: '_blank', rel: 'noopener', textContent: text, className: cls }));
+    r.stakes.forEach(([label, href]) => link(href, label, 'stake'));
+    if (!r.stakes.length) cams.append(el('span', { className: 'none', textContent: 'No stake cam' }));
+    if (r.cams) link(r.cams, 'Resort cams');
+    tr.append(el('td', {}, cams));
+    tb.append(tr);
+  });
+}
+
+function paintSort() {
+  document.querySelectorAll('th[data-sort]').forEach((th) => {
+    if (th.dataset.sort === state.sort && !state.grouped) th.setAttribute('aria-sort', state.dir === 'asc' ? 'ascending' : 'descending');
+    else th.removeAttribute('aria-sort');
+  });
+}
+
+const drawAll = () => { drawLede(); drawStakes(); drawRows(); };
+
+async function refresh() {
+  state.loading = true;
+  $('refresh').disabled = true;
+  $('updated').textContent = 'Fetching…';
+  if (!state.rows) drawAll();
+  try {
+    state.rows = await loadSnow();
+    $('updated').textContent = 'Updated ' + new Date().toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
+  } catch (e) {
+    $('updated').textContent = `Couldn't reach Open-Meteo (${e.message}). Press Refresh to try again.`;
+    if (!state.rows) $('lede').textContent = 'No data yet: the weather service did not answer.';
+  } finally {
+    state.loading = false;
+    $('refresh').disabled = false;
+    drawAll();
+  }
+}
+
+// Controls
+REGIONS.forEach((g) => $('region').append(new Option(g, g)));
+$('region').addEventListener('change', (e) => { state.region = e.target.value; drawStakes(); drawRows(); });
+$('stake-only').addEventListener('change', (e) => { state.stakeOnly = e.target.checked; drawStakes(); drawRows(); });
+$('refresh').addEventListener('click', refresh);
+document.querySelectorAll('#windows button').forEach((b) => b.addEventListener('click', () => {
+  state.win = b.dataset.win;
+  document.querySelectorAll('#windows button').forEach((x) => x.setAttribute('aria-pressed', String(x === b)));
+  drawStakes();
+}));
+document.querySelectorAll('th[data-sort]').forEach((th) => th.addEventListener('click', () => {
+  const k = th.dataset.sort;
+  if (state.sort === k && !state.grouped) state.grouped = true;
+  else { state.grouped = false; state.sort = k; state.dir = k === 'mine' ? 'asc' : 'desc'; }
+  paintSort(); drawRows();
+}));
+let lastW = 0;
+new ResizeObserver(() => { const w = $('stakes').clientWidth; if (w !== lastW) { lastW = w; drawStakes(); } }).observe($('stakes'));
+document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible' && state.rows && !state.loading) refresh(); });
+paintSort();
+refresh();
+</script>
+</body>
+</html>
